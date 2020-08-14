@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bitbucket-cicd
+  namespace: prod
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: bitbucket-cicd
+  namespace: prod
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: bitbucket-cicd
+  namespace: prod
+subjects:
+  - kind: ServiceAccount
+    name: bitbucket-cicd
+    namespace: prod
+    apiGroup: ""
+roleRef:
+  kind: Role
+  name: bitbucket-cicd
+  apiGroup: rbac.authorization.k8s.io

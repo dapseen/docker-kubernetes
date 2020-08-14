@@ -1,0 +1,60 @@
+image: golang:1.12.9-alpine3.10
+
+.deployment-script: &dep_script | 
+    apk add gettext
+    echo $KUBE_TOKEN | base64 -d > ./kube_token 
+    echo $KUBE_CA | base64 -d > ./kube_ca
+    #variable came in encoded version, it has to be decoded before passing it to EKS
+    kubectl config set-cluster $CLUSTER_NAME --server=$SERVER_URL --certificate-authority="$(pwd)/kube_ca"
+    kubectl config set-credentials $K8S_SA --token="$(cat ./kube_token)"
+    kubectl config set-context $K8S_SA --cluster=$CLUSTER_NAME --user=$K8S_SA
+    kubectl config use-context $K8S_SA
+    export HASH_RESULT=$(cat last_line.txt | awk '{print $3}') #extract digest using awk utility
+    echo $HASH_RESULT
+    cat k8s/deployments.yml | envsubst | kubectl apply -f - 
+
+definitions:
+  caches:
+    gobin: "${GOPATH}/bin"
+    vendor: "${IMPORT_PATH}/vendor"
+  steps:
+    - step: &Go-test
+        name: Static code Testing
+        script:
+          - source bitbucket-pipeline.sh
+          - go build .
+        
+    - step: &Deploy-to-dockerhub
+        name: Deploy to docker Hub
+        deployment: Deploy
+        services:
+          - docker
+        script:
+          - echo " deploy image to docker Hub"
+          - docker build -t ${BITBUCKET_REPO_OWNER}/${REPO_NAME} .
+          - docker login --username=${USERNAME} --password=${PASSWORD}
+          - docker tag ${BITBUCKET_REPO_OWNER}/${REPO_NAME} ${USERNAME}/${REPO_NAME} 
+          - docker push ${USERNAME}/${REPO_NAME} > digests.txt
+          - sed -n '$'p digests.txt > last_line.txt #get the last line of the response coming from ECR
+        artifacts: #artifacts for hash digest to be passed to other steps\
+          - last_line.txt
+
+    - step: &kubernetes-deploy
+        name: Deploy to Kubernetes
+        image: atlassian/pipelines-kubectl
+        script:
+            - *dep_script
+pipelines:
+    branches:
+      master:
+        - step:
+              <<: *Deploy-to-dockerhub
+              name: Deploy to dockerhub (production)
+              deployment: Deploy
+        - step:
+              <<: *kubernetes-deploy
+              name: Deploy to Kubernetes (production)
+              trigger: manual
+              deployment: Production
+options:
+  docker: true
